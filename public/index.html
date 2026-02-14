@@ -1131,6 +1131,35 @@ textarea {
   color: var(--muted);
 }
 
+.judge-presets {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.judge-preset {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  padding: 0.25rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+  color: var(--muted);
+  transition: var(--transition);
+}
+
+.judge-preset:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.judge-preset.selected {
+  border-color: var(--red);
+  color: var(--red);
+  font-weight: 600;
+}
+
 /* ========== LANDING RESULTS SHOWCASE ========== */
 .landing-results {
   position: relative;
@@ -1540,7 +1569,7 @@ textarea {
       </div>
 
       <div class="landing-results-header" style="margin-top:1rem;">
-        <p style="color:#5a5248;">Compliance % = model directly answers the question with factual information. Judged by openai/gpt-oss-120b.</p>
+        <p style="color:#5a5248;">Compliance % = model directly answers the question with factual information. Judged by LLM-as-a-judge (configurable).</p>
       </div>
     </div>
 
@@ -1590,12 +1619,18 @@ textarea {
       </div>
       <div class="config-field">
         <label>Judge Model</label>
-        <div class="hint">Fast, cheap American model for classification.</div>
-        <select id="judgeModel">
-          <option value="openai/gpt-oss-120b">openai/gpt-oss-120b (Recommended)</option>
-          <option value="x-ai/grok-4.1-fast">x-ai/grok-4.1-fast</option>
-          <option value="google/gemini-3-flash-preview">google/gemini-3-flash-preview</option>
-        </select>
+        <div class="hint">Any OpenRouter model. Fast, cheap models recommended for classification.</div>
+        <div class="model-search-container" id="judgeSearchContainer">
+          <span class="model-search-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
+          <input type="text" class="model-search-input" id="judgeModelInput" placeholder="Search for a judge model..." autocomplete="off" value="openai/gpt-oss-120b">
+          <input type="hidden" id="judgeModel" value="openai/gpt-oss-120b">
+          <div class="model-search-results" id="judgeSearchResults"></div>
+        </div>
+        <div class="judge-presets">
+          <span class="judge-preset selected" data-model="openai/gpt-oss-120b">openai/gpt-oss-120b</span>
+          <span class="judge-preset" data-model="x-ai/grok-4.1-fast">x-ai/grok-4.1-fast</span>
+          <span class="judge-preset" data-model="google/gemini-3-flash-preview">gemini-3-flash-preview</span>
+        </div>
       </div>
     </div>
 
@@ -2102,6 +2137,125 @@ async function searchModels(query) {
           addedSpan.textContent = 'already added';
         }
       }
+    });
+
+    results.appendChild(row);
+  });
+
+  results.classList.add('visible');
+}
+
+// ==================== JUDGE MODEL SEARCH ====================
+
+var judgeSearchDebounce = null;
+
+function initJudgeModelSearch() {
+  var input = document.getElementById('judgeModelInput');
+  var results = document.getElementById('judgeSearchResults');
+  var hidden = document.getElementById('judgeModel');
+
+  // Load saved judge model from localStorage
+  var savedJudge = localStorage.getItem('chinabench-judge-model');
+  if (savedJudge) {
+    input.value = savedJudge;
+    hidden.value = savedJudge;
+    updateJudgePresets(savedJudge);
+  }
+
+  input.addEventListener('input', function() {
+    clearTimeout(judgeSearchDebounce);
+    var query = input.value.trim().toLowerCase();
+    if (query.length < 2) {
+      results.classList.remove('visible');
+      return;
+    }
+    judgeSearchDebounce = setTimeout(function() { searchJudgeModels(query); }, 250);
+  });
+
+  input.addEventListener('focus', function() {
+    input.select();
+    if (input.value.trim().length >= 2) {
+      var query = input.value.trim().toLowerCase();
+      searchJudgeModels(query);
+    }
+  });
+
+  // Allow typing a custom model ID and pressing Enter
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      var val = input.value.trim();
+      if (val) {
+        selectJudgeModel(val);
+        results.classList.remove('visible');
+      }
+    }
+  });
+
+  // Also accept blur as confirmation of typed value
+  input.addEventListener('blur', function() {
+    setTimeout(function() {
+      var val = input.value.trim();
+      if (val && val !== hidden.value) {
+        selectJudgeModel(val);
+      }
+    }, 200);
+  });
+
+  document.addEventListener('click', function(e) {
+    if (!e.target.closest('#judgeSearchContainer')) {
+      results.classList.remove('visible');
+    }
+  });
+
+  // Preset buttons
+  document.querySelectorAll('.judge-preset').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      selectJudgeModel(btn.dataset.model);
+      input.value = btn.dataset.model;
+    });
+  });
+}
+
+function selectJudgeModel(modelId) {
+  document.getElementById('judgeModel').value = modelId;
+  document.getElementById('judgeModelInput').value = modelId;
+  localStorage.setItem('chinabench-judge-model', modelId);
+  updateJudgePresets(modelId);
+  updateEstimate();
+}
+
+function updateJudgePresets(modelId) {
+  document.querySelectorAll('.judge-preset').forEach(function(btn) {
+    btn.classList.toggle('selected', btn.dataset.model === modelId);
+  });
+}
+
+async function searchJudgeModels(query) {
+  var models = await fetchAllModels();
+  var results = document.getElementById('judgeSearchResults');
+
+  var filtered = models.filter(function(m) {
+    var text = (m.id + ' ' + m.name).toLowerCase();
+    return text.indexOf(query) !== -1;
+  }).slice(0, 12);
+
+  results.textContent = '';
+
+  if (filtered.length === 0) {
+    results.appendChild(createEl('div', { className: 'model-search-loading' }, 'No models found for "' + query + '"'));
+    results.classList.add('visible');
+    return;
+  }
+
+  filtered.forEach(function(m) {
+    var row = createEl('div', { className: 'model-search-result' });
+    row.appendChild(createEl('span', { className: 'msr-id' }, m.id));
+    row.appendChild(createEl('span', { className: 'msr-name' }, m.name));
+
+    row.addEventListener('click', function() {
+      selectJudgeModel(m.id);
+      results.classList.remove('visible');
     });
 
     results.appendChild(row);
@@ -2775,6 +2929,7 @@ function initHeatmap() {
 document.addEventListener('DOMContentLoaded', function() {
   initConfigPage();
   initModelSearch();
+  initJudgeModelSearch();
   fetchPricing();
   initHeatmap();
 
