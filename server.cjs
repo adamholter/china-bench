@@ -3,6 +3,27 @@ const fs = require('fs');
 const path = require('path');
 
 const PORT = 9147;
+const OPENROUTER_URL = 'https://openrouter.ai/api/v1';
+
+function localApiBase(baseUrl) {
+  const value = baseUrl || 'http://127.0.0.1:8000/v1';
+  const url = new URL(value);
+  // This proxy is intended for a server started on the same machine. Limiting it
+  // to loopback prevents a user-supplied endpoint from turning the local runner
+  // into a general-purpose network proxy.
+  if (!['127.0.0.1', 'localhost', '::1'].includes(url.hostname)) {
+    throw new Error('Local endpoint must use localhost, 127.0.0.1, or ::1');
+  }
+  url.pathname = url.pathname.replace(/\/$/, '');
+  return url.toString();
+}
+
+function openAiHeaders(apiKey) {
+  return {
+    'Content-Type': 'application/json',
+    ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+  };
+}
 
 const MIME_TYPES = {
   '.html': 'text/html',
@@ -32,20 +53,27 @@ const server = http.createServer(async (req, res) => {
     req.on('data', c => body += c);
     req.on('end', async () => {
       try {
-        const { apiKey, model, messages, temperature, max_tokens } = JSON.parse(body);
+        const { apiKey, model, messages, temperature, max_tokens, provider, baseUrl } = JSON.parse(body);
         const startTime = Date.now();
 
         const payload = { model, messages, temperature: temperature ?? 0.0 };
         if (max_tokens) payload.max_tokens = max_tokens;
 
-        const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        const isLocal = provider === 'local';
+        const endpoint = isLocal
+          ? `${localApiBase(baseUrl)}/chat/completions`
+          : `${OPENROUTER_URL}/chat/completions`;
+        const headers = isLocal
+          ? openAiHeaders(apiKey)
+          : {
+              ...openAiHeaders(apiKey),
+              'HTTP-Referer': 'https://china-bench.localhost',
+              'X-Title': 'China Censorship Benchmark',
+            };
+
+        const orRes = await fetch(endpoint, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
-            'HTTP-Referer': 'https://china-bench.localhost',
-            'X-Title': 'China Censorship Benchmark',
-          },
+          headers,
           body: JSON.stringify(payload),
         });
 
@@ -65,9 +93,11 @@ const server = http.createServer(async (req, res) => {
   // API: Get available models from OpenRouter
   if (url.pathname === '/api/models' && req.method === 'GET') {
     const apiKey = url.searchParams.get('key');
+    const isLocal = url.searchParams.get('provider') === 'local';
+    const baseUrl = url.searchParams.get('baseUrl');
     try {
-      const orRes = await fetch('https://openrouter.ai/api/v1/models', {
-        headers: apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {},
+      const orRes = await fetch(isLocal ? `${localApiBase(baseUrl)}/models` : `${OPENROUTER_URL}/models`, {
+        headers: isLocal ? openAiHeaders(apiKey) : (apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {}),
       });
       const data = await orRes.json();
       res.writeHead(200, { 'Content-Type': 'application/json' });

@@ -5,6 +5,9 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(204).end();
 
   const apiKey = req.query.key;
+  if (req.query.provider === 'local') {
+    return res.status(400).json({ error: 'Local model discovery requires the local server: node server.cjs.' });
+  }
   try {
     const orRes = await fetch('https://openrouter.ai/api/v1/models', {
       headers: apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {},
