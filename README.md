@@ -8,6 +8,11 @@ The benchmark corpus is stored in [public/prompts.json](public/prompts.json).
 Edit that file to add, remove, or change categories and prompts; the UI fetches
 it when it loads.
 
+The judge instructions are in
+[public/judge-system-prompt.txt](public/judge-system-prompt.txt). The UI loads
+this file before a benchmark can run, so it can be reviewed and versioned
+independently from the application code.
+
 ## Run locally with Hugging Face models
 
 The local server supports any **OpenAI-compatible** chat-completions server. A
